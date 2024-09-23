@@ -19,7 +19,7 @@ namespace SpotifyToText
     class Program
     {
         private static readonly string credentialsPath = "C:/Users/Jonathan/Documents/secretkeyopenai.json";
-        private static readonly string systemPrompt = 
+        private static readonly string systemPrompt =
             "You are musicGPT. You recommend songs based on input. These are songs in an spotify playlist. Please recommend songs based on this selection. " +
             "Please recommend $$$ songs." +
             "Please consider the second part of the message as requiered for the recommendations." +
@@ -49,8 +49,9 @@ namespace SpotifyToText
 
             Console.WriteLine("Please enter the Spotify playlist link or leave empty:");
             string playlistUrl = Console.ReadLine();
-            string inspirationPlaylistId;
+            string inspirationPlaylistId ="";
             string prompt = "";
+            bool extendPlaylist = false;
             if (string.IsNullOrEmpty(playlistUrl))
             {
                 prompt = "Pick any songs that you think are right. There are noi songs as input. Please keepm the given structure of Song: Songname, Artist: Artistname, Album: Albumname";
@@ -58,6 +59,11 @@ namespace SpotifyToText
             else
             {
                 inspirationPlaylistId = SpotifyCall.ExtractPlaylistId(playlistUrl);
+
+                // Check if the user wants to extend the existing playlist or create a new one
+                Console.WriteLine("Do you want to extend the existing playlist? (yes/no)");
+                string extendChoice = Console.ReadLine()?.ToLower();
+                extendPlaylist = extendChoice == "yes";
 
                 try
                 {
@@ -85,9 +91,9 @@ namespace SpotifyToText
             Console.WriteLine("How many songs are you looking for");
             string ammountRequest = Console.ReadLine();
             string preparedSystemPrompt = "";
-            if(IsNumber(ammountRequest, out int ammount))
+            if (IsNumber(ammountRequest, out int ammount))
             {
-                preparedSystemPrompt = ReplacePlaceholder(systemPrompt,"$$$", ammount.ToString());
+                preparedSystemPrompt = ReplacePlaceholder(systemPrompt, "$$$", ammount.ToString());
             }
             else
             {
@@ -99,42 +105,66 @@ namespace SpotifyToText
             string promptExtra = prompt + " Second part: " + " " + extraWishes;
             //Console.WriteLine(systemPrompt);
             //Console.WriteLine(prompt);
-
+            if (!string.IsNullOrEmpty(inspirationPlaylistId))
+            {
+                Console.WriteLine($"- Inspiration Playlist ID: {inspirationPlaylistId}");
+                Console.WriteLine($"- Will the playlist be extended? {(extendPlaylist ? "Yes" : "No")}");
+            }
+            Console.WriteLine("Note: The next step might take longer because it involves a call to the GPT API, which can vary in response time based on server load and the complexity of the request.");
             string response = await GptCall.GetGPT4Response(credentials.ApiKey.Trim(), promptExtra, preparedSystemPrompt);
             Console.WriteLine("Parsing songs");
 
             List<string> songs = ParseSongs(response);
+            Console.WriteLine($"Parsed {songs.Count} songs.");
 
-
-            // create playlist
-
-            string playlistName = "New Playlist";
-            string playlistDescription = "A new playlist created via the Spotify API";
-            playlistName += " Songs like " + GetSongName(songs[0]);
-            playlistName += " but '" + extraWishes + "'";
-            Console.WriteLine("New Playlist: " + playlistName);
-            Console.WriteLine("Press any key to create list");
-            Console.ReadKey();
+            // create playlist or extend existing playlist
 
             Console.WriteLine("Searching for song uris...");
             // Example list of track URIs (replace with actual URIs)
             List<string> uris = await SpotifyCall.GetTrackUris(songs, accessToken);
-            Console.WriteLine("Recieved song uris. Creating playlist...");
+            Console.WriteLine("Recieved song uris");
 
-            try
+            if (extendPlaylist)
             {
-                // Step 1: Create a new playlist
-                string newPlaylistId = await SpotifyCall.CreatePlaylist(playlistName, playlistDescription, accessToken);
-                Console.WriteLine("Created Playlist ID: " + newPlaylistId);
-
-                // Step 2: Add tracks to the new playlist
-                await SpotifyCall.AddTracksToPlaylist(newPlaylistId, uris, accessToken);
+                Console.Write(" Extending existing playlist...");
+                // Use the existing playlist ID for extending
+                string existingPlaylistId = inspirationPlaylistId; // Assuming this is the ID of the existing playlist
+                await SpotifyCall.AddTracksToPlaylist(existingPlaylistId, uris, accessToken);
+                Console.WriteLine("Tracks added to existing playlist: " + existingPlaylistId);
+                Console.WriteLine("Process ended sucssesfull");
+                return; // Exit after extending
             }
-            catch (Exception e)
+            else
             {
-                Console.WriteLine("Error: " + e.Message);
-            }
+                Console.Write(" Creating new playlist...");
+                string playlistName;
+                string playlistDescription = "A new playlist created via the Spotify API";
+                playlistName = "🤖 Playlist:";
+                playlistName += " Songs like " + GetSongName(songs[0]);
+                playlistName += " but '" + extraWishes + "'";
+                Console.WriteLine("Playlist: " + playlistName);
+                Console.WriteLine("Write 'yes' to create list:");
+                string userInput = Console.ReadLine()?.ToLower();
+                if (userInput != "yes")
+                {
+                    Console.WriteLine("Playlist creation canceled.");
+                    return; // Exit if the user does not confirm
+                }
 
+                try
+                {
+                    // Step 1: Create a new playlist
+                    string newPlaylistId = await SpotifyCall.CreatePlaylist(playlistName, playlistDescription, accessToken);
+                    Console.WriteLine("Created Playlist ID: " + newPlaylistId);
+
+                    // Step 2: Add tracks to the new playlist
+                    await SpotifyCall.AddTracksToPlaylist(newPlaylistId, uris, accessToken);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Error: " + e.Message);
+                }
+            }
         }
 
         public static JsonCredentials LoadCredentialsFromJsonFile(string filePath)
@@ -146,7 +176,7 @@ namespace SpotifyToText
 
         static List<string> ParseSongs(string input)
         {
-            var songs = new List<string>(); 
+            var songs = new List<string>();
             var parts = input.Split(new[] { "Song: " }, StringSplitOptions.RemoveEmptyEntries);
 
             foreach (var part in parts)
